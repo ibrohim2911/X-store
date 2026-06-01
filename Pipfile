@@ -7,7 +7,16 @@ name = "pypi"
 django = {extras = ["argon2"], version = "==5.2"}
 djangorestframework = "*"
 drf-spectacular = "*"
+waitress = "*"
+pywebview = "*"
+pyinstaller = "*"
+qrcode = "*"
 pillow = "*"
+django-filter = "*"
+django-cors-headers = "*"
+argon2-cffi = "*"
+channels = "*"
+daphne = "*"
 
 [dev-packages]
 
