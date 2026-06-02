@@ -11,12 +11,14 @@ waitress = "*"
 pywebview = "*"
 pyinstaller = "*"
 qrcode = "*"
-pillow = "*"
 django-filter = "*"
 django-cors-headers = "*"
 argon2-cffi = "*"
 channels = "*"
 daphne = "*"
+pywin32 = "*"
+python-barcode = "*"
+pillow = "*"
 
 [dev-packages]
 

@@ -34,3 +34,11 @@ class Cash(BaseModel):
 
     def __str__(self):
         return f"Cash Payment for Sale #{self.sale.id} - Amount: {self.amount}"
+
+class AuditLog(BaseModel):
+    user = models.ForeignKey('user.User', on_delete=models.SET_NULL, null=True, blank=True)
+    action = models.CharField(max_length=255)
+    description = models.TextField(blank=True, null=True)
+
+    def __str__(self):
+        return f"{self.user.name if self.user else 'System'} - {self.action} at {self.created_at}"

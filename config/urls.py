@@ -27,6 +27,7 @@ router.register(r'sales', sale_views.SaleViewSet)
 router.register(r'sale-items', sale_views.SaleItemViewSet)
 router.register(r'sizes', product_views.SizeViewSet)
 router.register(r'size-scales', product_views.SizeScaleViewSet)
+router.register(r'audit-logs', sale_views.AuditLogViewSet)
 
 urlpatterns = [
     path('admin/', admin.site.urls),
