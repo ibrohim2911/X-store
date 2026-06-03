@@ -5,6 +5,8 @@ class ProductSerializer(serializers.ModelSerializer):
         model = Products
         fields = '__all__'
 class VariantSerializer(serializers.ModelSerializer):
+    product_name = serializers.CharField(source='product.name', read_only=True)
+    size_name = serializers.CharField(source='size.name', read_only=True)
     class Meta:
         model = Variant
         fields = '__all__'

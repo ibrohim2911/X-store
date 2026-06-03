@@ -1,7 +1,16 @@
-from .models import Sale, SaleItem, Cash, PaymentMenthod, Client, AuditLog
+from .models import Sale, SaleItem, Cash, PaymentMenthod, Client, AuditLog, SystemSetting
 from rest_framework import serializers
 
+class SystemSettingSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SystemSetting
+        fields = '__all__'
+
+
 class SaleItemSerializer(serializers.ModelSerializer):
+    product_name = serializers.CharField(source='variant.product.name', read_only=True)
+    size_name = serializers.CharField(source='variant.size.name', read_only=True)
+    sku = serializers.CharField(source='variant.sku', read_only=True)
     class Meta:
         model = SaleItem
         fields = '__all__'
@@ -12,6 +21,7 @@ class CashSerializer(serializers.ModelSerializer):
 class SaleSerializer(serializers.ModelSerializer):
     items = SaleItemSerializer(many=True, read_only=True)
     payments = CashSerializer(many=True, read_only=True)
+    seller_name = serializers.CharField(source='seller.name', read_only=True)
     class Meta:
         model = Sale
         fields = '__all__'

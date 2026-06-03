@@ -12,6 +12,7 @@ from django.conf import settings
 from django.conf.urls.static import static
 from product import views as product_views
 from user import views as user_views
+from common import views as common_views
 from sale import views as sale_views
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from rest_framework import routers
@@ -28,6 +29,7 @@ router.register(r'sale-items', sale_views.SaleItemViewSet)
 router.register(r'sizes', product_views.SizeViewSet)
 router.register(r'size-scales', product_views.SizeScaleViewSet)
 router.register(r'audit-logs', sale_views.AuditLogViewSet)
+router.register(r'system-settings', sale_views.SystemSettingViewSet)
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -37,6 +39,7 @@ urlpatterns = [
     path('api/logout/', user_views.LogoutView.as_view(), name='logout'),
     path('api/dashboard/stats/', sale_views.DashboardStatsView.as_view(), name='dashboard-stats'),
     path('api/ngrok-url/', sale_views.NgrokUrlView.as_view(), name='ngrok-url'),
+    path('api/settings/printer/', common_views.PrinterSettingView.as_view(), name='printer-settings'),
     path('api/', include(router.urls)),
     re_path(r'^media/(?P<path>.*)$', serve, {'document_root': settings.MEDIA_ROOT}),
 ] + static('/assets/', document_root=settings.BASE_DIR / 'frontend_dist/assets')

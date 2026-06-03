@@ -2,6 +2,13 @@ from django.db import models
 from common.models import BaseModel
 from product.models import Products
 
+class SystemSetting(models.Model):
+    key = models.CharField(max_length=50, unique=True)
+    value = models.CharField(max_length=255)
+
+    def __str__(self):
+        return f"{self.key}: {self.value}"
+
 class Client(BaseModel):
     name = models.CharField(max_length=200)
     phone = models.CharField(max_length=100)
@@ -21,6 +28,8 @@ class SaleItem(BaseModel):
     variant = models.ForeignKey('product.Variant', on_delete=models.CASCADE)
     quantity = models.IntegerField()
     price = models.DecimalField(max_digits=10, decimal_places=2)
+    applied_tax_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    
     def __str__(self):
         return f"{self.variant.product.name} - {self.quantity} - {self.price}"
 

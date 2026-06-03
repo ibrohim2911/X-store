@@ -20,7 +20,7 @@ def handle_sale_updates(sender, instance, **kwargs):
             return
         
         # If the sale status is changing to returned
-        if old_sale.status == 'completed' and instance.status == 'returned':
+        if old_sale.status == 'completed' and instance.status == 'returned' and not getattr(instance, 'skip_signal', False):
             with transaction.atomic():
                 # Restock variants
                 for item in instance.items.all():

@@ -8,13 +8,17 @@ from rest_framework import status
 from django.db import transaction
 from django.db.models import Sum, F, Q
 from django_filters import rest_framework as filters
-from .models import Sale, SaleItem, Cash, PaymentMenthod, Client, AuditLog
-from .serializers import SaleSerializer, SaleItemSerializer, CashSerializer, PaymentMenthodSerializer, ClientSerializer, AuditLogSerializer
+from .models import Sale, SaleItem, Cash, PaymentMenthod, Client, AuditLog, SystemSetting
+from .serializers import SaleSerializer, SaleItemSerializer, CashSerializer, PaymentMenthodSerializer, ClientSerializer, AuditLogSerializer, SystemSettingSerializer
 from product.models import Variant
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 import urllib.request
 import json
+
+class SystemSettingViewSet(viewsets.ModelViewSet):
+    queryset = SystemSetting.objects.all()
+    serializer_class = SystemSettingSerializer
 
 class NgrokUrlView(APIView):
     permission_classes = []
@@ -85,7 +89,7 @@ class SaleViewSet(viewsets.ModelViewSet):
         if search:
             queryset = queryset.filter(
                 Q(items__variant__sku__icontains=search) |
-                Q(items__variant__barcode__icontains=search) |
+                Q(items__variant__product__barcode__icontains=search) |
                 Q(client__name__icontains=search) |
                 Q(client__phone__icontains=search)
             ).distinct()
@@ -100,6 +104,7 @@ class SaleViewSet(viewsets.ModelViewSet):
         
         old_items = sale.items.all()
         old_quantities = {item.variant_id: item.quantity for item in old_items}
+        old_items_dict = {item.variant_id: item for item in old_items}
         
         new_quantities = {}
         for item_data in new_items_data:
@@ -107,6 +112,7 @@ class SaleViewSet(viewsets.ModelViewSet):
             qty = int(item_data.get('quantity', 0))
             new_quantities[vid] = new_quantities.get(vid, 0) + qty
             
+        # Validate stock
         for vid, new_qty in new_quantities.items():
             old_qty = old_quantities.get(vid, 0)
             diff = new_qty - old_qty
@@ -115,27 +121,120 @@ class SaleViewSet(viewsets.ModelViewSet):
                 if variant.quantity < diff:
                     return Response({'error': f'Not enough stock for variant {variant.sku}. Available: {variant.quantity}'}, status=status.HTTP_400_BAD_REQUEST)
         
-        for item in old_items:
-            variant = Variant.objects.get(id=item.variant_id)
-            variant.quantity += item.quantity
+        # Handle returns and tax refunds
+        # Handle returns of items (product price refund only, tax is handled below via net difference)
+        for vid, old_qty in old_quantities.items():
+            # Items are returned to stock
+            variant = Variant.objects.get(id=vid)
+            variant.quantity += old_qty
             variant.save()
+            
+            new_qty = new_quantities.get(vid, 0)
+            diff = old_qty - new_qty
+            if diff > 0:
+                old_item = old_items_dict[vid]
+                price = old_item.price
+                refund_amount = decimal.Decimal(str(price)) * decimal.Decimal(str(diff))
+                
+                # Create Cash Chiqim for refunded product price
+                if refund_amount > 0:
+                    Cash.objects.create(
+                        user=sale.seller,
+                        is_cash_in=False,
+                        amount=refund_amount,
+                        reason="returned sale item",
+                        sale=sale
+                    )
+                
         old_items.delete()
         
+        # First, get default_tax
+        tax_setting = SystemSetting.objects.filter(key='tax_amount').first()
+        default_tax = decimal.Decimal(str(tax_setting.value)) if tax_setting else decimal.Decimal('20000.00')
+
+        # Calculate old tax totals per variant
+        old_tax_totals = {vid: item.quantity * item.applied_tax_amount for vid, item in old_items_dict.items()}
+
+        # Calculate new tax totals per variant and prepare new items
+        new_tax_totals = {}
+        new_applied_taxes = {}
         for item_data in new_items_data:
             vid = int(item_data.get('variant'))
             qty = int(item_data.get('quantity', 0))
-            variant = Variant.objects.get(id=vid)
-            variant.quantity -= qty
-            variant.save()
-            SaleItem.objects.create(
-                sale=sale,
-                variant=variant,
-                quantity=qty,
-                price=item_data.get('price')
-            )
+            apply_tax = item_data.get('apply_tax')
+            
+            if apply_tax is None:
+                if vid in old_items_dict:
+                    applied_tax = old_items_dict[vid].applied_tax_amount
+                else:
+                    applied_tax = default_tax
+            elif apply_tax:
+                if vid in old_items_dict and old_items_dict[vid].applied_tax_amount > 0:
+                    applied_tax = old_items_dict[vid].applied_tax_amount
+                else:
+                    applied_tax = default_tax
+            else:
+                applied_tax = decimal.Decimal('0.00')
+                
+            new_applied_taxes[vid] = applied_tax
+            new_tax_totals[vid] = qty * applied_tax
+
+        # Handle tax differences
+        all_vids = set(old_tax_totals.keys()).union(set(new_tax_totals.keys()))
+        for vid in all_vids:
+            old_tax = old_tax_totals.get(vid, decimal.Decimal('0.00'))
+            new_tax = new_tax_totals.get(vid, decimal.Decimal('0.00'))
+            diff_tax = new_tax - old_tax
+            
+            if diff_tax > 0:
+                # We need to charge more tax
+                Cash.objects.create(
+                    user=sale.seller,
+                    is_cash_in=False,
+                    amount=diff_tax,
+                    reason="20 tax (updated)",
+                    sale=sale
+                )
+            elif diff_tax < 0:
+                # We need to refund some tax
+                Cash.objects.create(
+                    user=sale.seller,
+                    is_cash_in=True,
+                    amount=abs(diff_tax),
+                    reason="returned 20 tax (updated)",
+                    sale=sale
+                )
+
+        # Re-create items with new quantities
+        total_new_qty = 0
+        for item_data in new_items_data:
+            vid = int(item_data.get('variant'))
+            qty = int(item_data.get('quantity', 0))
+            if qty > 0:
+                total_new_qty += qty
+                variant = Variant.objects.get(id=vid)
+                
+                applied_tax = new_applied_taxes.get(vid, decimal.Decimal('0.00'))
+                
+                SaleItem.objects.create(
+                    sale=sale,
+                    variant=variant,
+                    quantity=qty,
+                    price=item_data.get('price'),
+                    applied_tax_amount=applied_tax
+                )
             
         sale.total_price = decimal.Decimal(str(request.data.get('total_price', sale.total_price)))
         sale.debt = decimal.Decimal(str(request.data.get('debt', sale.debt)))
+        
+        # Auto-return if empty
+        if total_new_qty == 0:
+            sale.status = 'returned'
+            setattr(sale, 'skip_signal', True)
+        else:
+            sale.status = 'completed'
+            setattr(sale, 'skip_signal', True)
+            
         sale.save()
         
         log_audit(request.user, "Sale Swapped/Refunded", f"Sale ID: {sale.id} updated items")
@@ -146,14 +245,21 @@ class SaleViewSet(viewsets.ModelViewSet):
     @transaction.atomic
     def create_with_items(self, request, pk=None):
         seller = request.user
-        request.data['seller'] = seller.id if seller and not seller.is_anonymous else 1
-        request.data['status'] = 'completed'
-        request.data['total_price'] = decimal.Decimal(str(request.data.get('total_price', '0.00')))
-        request.data['debt'] = decimal.Decimal(str(request.data.get('debt', '0.00')))
-        serializer = SaleSerializer(data=request.data)
+        data = request.data.copy()
+        
+        if seller and not seller.is_anonymous:
+            data['seller'] = seller.id
+        else:
+            data['seller'] = 1
+            
+        data['status'] = 'completed'
+        data['total_price'] = decimal.Decimal(str(data.get('total_price', '0.00')))
+        data['debt'] = decimal.Decimal(str(data.get('debt', '0.00')))
+        
+        serializer = SaleSerializer(data=data)
         
         if serializer.is_valid():
-            items_data = request.data.get('items', [])
+            items_data = data.get('items', [])
             
             # Pre-validate stock before saving anything
             for item_data in items_data:
@@ -165,34 +271,38 @@ class SaleViewSet(viewsets.ModelViewSet):
                         status=status.HTTP_400_BAD_REQUEST
                     )
 
-            sale = serializer.save(seller=seller if seller and not seller.is_anonymous else None)
+            sale = serializer.save()
             
+            # Get default tax from Settings
+            tax_setting = SystemSetting.objects.filter(key='tax_amount').first()
+            default_tax = decimal.Decimal(str(tax_setting.value)) if tax_setting else decimal.Decimal('20000.00')
+
             for item_data in items_data:
                 variant = Variant.objects.get(id=item_data.get('variant'))
                 qty = int(item_data.get('quantity', 0))
-                variant.quantity -= qty
-                variant.save()
+                apply_tax = item_data.get('apply_tax', True)
+                
+                applied_tax = default_tax if apply_tax else decimal.Decimal('0.00')
+                
                 SaleItem.objects.create(
                     sale=sale,
                     variant=variant,
                     quantity=qty,
-                    price=item_data.get('price')
+                    price=item_data.get('price'),
+                    applied_tax_amount=applied_tax
                 )
-            
-            apply_tax = request.data.get('apply_tax', False)
-            if apply_tax:
-                total_qty = sum(int(item.get('quantity', 0)) for item in items_data)
-                tax_amount = total_qty * 20000
-                if tax_amount > 0:
+                
+                # Deduct tax from cash immediately
+                if applied_tax > 0 and qty > 0:
                     Cash.objects.create(
-                        user=seller if seller and not seller.is_anonymous else None,
+                        user=sale.seller,
                         is_cash_in=False,
-                        amount=tax_amount,
+                        amount=applied_tax * qty,
                         reason="20 tax",
                         sale=sale
                     )
             
-            log_audit(request.user, "Sale Created", f"Sale ID: {sale.id}, Total: {sale.total_price}, Tax Applied: {apply_tax}")
+            log_audit(request.user, "Sale Created", f"Sale ID: {sale.id}, Total: {sale.total_price}")
             broadcast_update('sales_updated')
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         else:

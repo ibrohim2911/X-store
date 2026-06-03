@@ -9,6 +9,12 @@ from daphne.endpoints import build_endpoint_description_strings
 import webbrowser
 import qrcode
 from PIL import Image, ImageTk
+import urllib.request
+import json
+import subprocess
+import time
+
+CURRENT_VERSION = "v1.0.5"
 
 def get_local_ip():
     try:
@@ -83,6 +89,98 @@ def run_app(local_ip):
     # Open Default Web Browser
     webbrowser.open('http://127.0.0.1:8000')
 
+def update_application(root):
+    try:
+        req = urllib.request.Request("https://api.github.com/repos/ibrohim2911/X-store/releases/latest")
+        req.add_header('User-Agent', 'X-Store-Updater')
+        with urllib.request.urlopen(req) as response:
+            data = json.loads(response.read().decode())
+            latest_version = data.get('tag_name')
+            assets = data.get('assets', [])
+            
+        if not latest_version:
+            messagebox.showinfo("Update", "Could not check for updates.")
+            return
+            
+        if latest_version == CURRENT_VERSION:
+            messagebox.showinfo("Update", "You are already using the latest version.")
+            return
+            
+        if not assets:
+            messagebox.showinfo("Update", f"Version {latest_version} is available, but no executable was found in the release.")
+            return
+            
+        download_url = assets[0].get('browser_download_url')
+        
+        if messagebox.askyesno("Update Available", f"A new version ({latest_version}) is available!\n\nDo you want to download and install it now?"):
+            from tkinter import ttk
+            import threading
+            
+            # Show a downloading window
+            progress_win = tk.Toplevel(root)
+            progress_win.title("Downloading Update")
+            progress_win.geometry("350x150")
+            tk.Label(progress_win, text=f"Downloading {latest_version}...").pack(pady=(20, 10))
+            
+            progress_var = tk.DoubleVar()
+            progress_bar = ttk.Progressbar(progress_win, variable=progress_var, maximum=100)
+            progress_bar.pack(fill='x', padx=20)
+            
+            progress_label = tk.Label(progress_win, text="0%")
+            progress_label.pack(pady=5)
+            
+            progress_win.update()
+
+            def run_download():
+                try:
+                    if getattr(sys, 'frozen', False):
+                        current_exe_path = sys.executable
+                    else:
+                        current_exe_path = os.path.abspath("XStore.exe")
+                        
+                    exe_dir = os.path.dirname(current_exe_path)
+                    update_exe_path = os.path.join(exe_dir, "XStore_update.exe")
+                    
+                    def reporthook(blocknum, blocksize, totalsize):
+                        readso_far = blocknum * blocksize
+                        if totalsize > 0:
+                            percent = (readso_far * 100) / totalsize
+                            if percent > 100: percent = 100
+                            root.after(0, lambda p=percent: progress_var.set(p))
+                            root.after(0, lambda p=percent: progress_label.config(text=f"{int(p)}%"))
+
+                    urllib.request.urlretrieve(download_url, update_exe_path, reporthook)
+                    
+                    root.after(0, finalize_update, current_exe_path, update_exe_path, exe_dir)
+                except Exception as e:
+                    root.after(0, progress_win.destroy)
+                    root.after(0, lambda err=e: messagebox.showerror("Download Error", f"Failed to download update:\n{str(err)}"))
+
+            def finalize_update(current_exe_path, update_exe_path, exe_dir):
+                progress_win.destroy()
+                bat_path = os.path.join(exe_dir, "updater.bat")
+                
+                with open(bat_path, "w") as f:
+                    f.write(f'''@echo off
+cd /d "{exe_dir}"
+:wait
+timeout /t 1 /nobreak > NUL
+del "{current_exe_path}"
+if exist "{current_exe_path}" goto wait
+move /y "{update_exe_path}" "{current_exe_path}"
+start "" "{current_exe_path}"
+del "%~f0"
+''')
+                # Launch batch file hidden and exit
+                CREATE_NO_WINDOW = 0x08000000
+                subprocess.Popen([bat_path], shell=True, creationflags=CREATE_NO_WINDOW)
+                sys.exit(0)
+
+            threading.Thread(target=run_download, daemon=True).start()
+            
+    except Exception as e:
+        messagebox.showerror("Update Error", f"Failed to check for updates:\n{str(e)}")
+
 def main():
     local_ip = get_local_ip()
     url = f"http://{local_ip}:8000"
@@ -116,9 +214,11 @@ def main():
               bg="#e2e8f0", command=run_migrations).pack(pady=5)
     tk.Button(root, text="2. Create Admin User", font=("Helvetica", 10, "bold"), width=30, height=2, 
               bg="#e2e8f0", command=create_superuser).pack(pady=5)
+    tk.Button(root, text="3. Check for Updates", font=("Helvetica", 10, "bold"), width=30, height=2, 
+              bg="#e2e8f0", command=lambda: update_application(root)).pack(pady=5)
     
     tk.Button(root, text="Launch POS System", font=("Helvetica", 12, "bold"), width=25, height=2, 
-              bg="#4f46e5", fg="white", command=lambda: run_app(local_ip)).pack(pady=20)
+              bg="#4f46e5", fg="white", command=lambda: run_app(local_ip)).pack(pady=15)
 
     root.mainloop()
 
