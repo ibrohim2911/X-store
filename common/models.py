@@ -1,14 +1,25 @@
 from django.db import models
 
+import uuid
+
 # Create your models here.
 class BaseModel(models.Model):
-    id = models.AutoField(primary_key=True)
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         abstract = True
+
+class Store(BaseModel):
+    name = models.CharField(max_length=255)
+    address = models.TextField(blank=True, null=True)
+    phone_number = models.CharField(max_length=20, blank=True, null=True)
+    is_active = models.BooleanField(default=True)
+
+    def __str__(self):
+        return self.name
 
 class PrinterSetting(BaseModel):
     printer_name = models.CharField(max_length=255, default='Xprinter XP-365B')

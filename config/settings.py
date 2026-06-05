@@ -56,6 +56,7 @@ INSTALLED_APPS = [
     'product',
     'sale',
     'common',
+    'sync',
     'channels',
 ]
 AUTH_USER_MODEL = 'user.User'
@@ -145,6 +146,7 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/4.2/howto/static-files/
 
 STATIC_URL = 'static/'
+STATIC_ROOT = DB_DIR / 'staticfiles'
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = DB_DIR / 'media'

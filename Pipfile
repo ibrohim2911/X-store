@@ -19,6 +19,7 @@ daphne = "*"
 pywin32 = "*"
 python-barcode = "*"
 pillow = "*"
+requests = "*"
 
 [dev-packages]
 

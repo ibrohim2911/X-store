@@ -8,10 +8,17 @@ from django.db import transaction
 import time
 import random
 from .serializers import ProductSerializer, VariantSerializer, SizeSerializer, SizeScaleSerializer
+from rest_framework.permissions import IsAuthenticated
+from common.permissions import IsRoleAuthorized
+
 class ProductViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAuthenticated, IsRoleAuthorized]
     queryset = Products.objects.all()
     serializer_class = ProductSerializer
-    
+    pagination_class = None
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)
+
     def perform_update(self, serializer):
         instance = serializer.save()
         if not instance.barcode:
@@ -31,6 +38,8 @@ class ProductViewSet(viewsets.ModelViewSet):
             try:
                 variants_data = json.loads(variants_data)
             except ValueError as e:
+                from django.db import transaction
+                transaction.set_rollback(True)
                 return Response({"error": f"Invalid JSON in variants: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
                 
         product = Products.objects.create(name=name, img=img, barcode=barcode)
@@ -44,15 +53,21 @@ class ProductViewSet(viewsets.ModelViewSet):
             size_id = variant_data.get('size')
             size_obj = None
             
-            # Safely get Size, it could be an ID or a Name string
-            if str(size_id).isdigit():
+            # Safely get Size, it could be an ID (UUID) or a Name string
+            import uuid
+            try:
+                uuid.UUID(str(size_id))
                 size_obj = Size.objects.filter(id=size_id).first()
+            except ValueError:
+                pass
             
             # If not found by ID, try by name
             if not size_obj:
                 size_obj = Size.objects.filter(name=size_id).first()
                 
             if not size_obj:
+                from django.db import transaction
+                transaction.set_rollback(True)
                 return Response({"error": f"Size not found for size identifier: {size_id}"}, status=status.HTTP_400_BAD_REQUEST)
 
             sticker_price = variant_data.get('sticker_price', 0)
@@ -217,13 +232,30 @@ class ProductViewSet(viewsets.ModelViewSet):
             import traceback
             return Response({'error': str(e), 'traceback': traceback.format_exc()}, status=500)
 class VariantViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAuthenticated, IsRoleAuthorized]
     queryset = Variant.objects.all()
     serializer_class = VariantSerializer
+    pagination_class = None
     filter_backends = [filters.SearchFilter]
     search_fields = ['product__name', 'sku', 'product__barcode', 'size__name']
-class SizeViewSet(viewsets.ModelViewSet):
-    queryset = Size.objects.all()
-    serializer_class = SizeSerializer
+    
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)
+
 class SizeScaleViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAuthenticated, IsRoleAuthorized]
     queryset = SizeScale.objects.all()
     serializer_class = SizeScaleSerializer
+    pagination_class = None
+    
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)
+
+class SizeViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAuthenticated, IsRoleAuthorized]
+    queryset = Size.objects.all()
+    serializer_class = SizeSerializer
+    pagination_class = None
+    
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)

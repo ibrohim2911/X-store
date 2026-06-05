@@ -26,6 +26,23 @@ def get_local_ip():
     except Exception:
         return "127.0.0.1"
 
+def check_initial_db():
+    import shutil
+    from pathlib import Path
+    appdata_dir = os.environ.get('APPDATA')
+    if not appdata_dir: return
+    appdata_db = Path(appdata_dir) / 'XStore' / 'db.sqlite3'
+    if not appdata_db.exists():
+        base_dir = Path(os.path.dirname(os.path.abspath(sys.argv[0])))
+        local_db = base_dir / 'yangi_baza.sqlite3'
+        if not local_db.exists():
+            local_db = base_dir / 'db.sqlite3'
+        if local_db.exists():
+            appdata_db.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(local_db, appdata_db)
+
+check_initial_db()
+
 # Setup Django globally before GUI so imports work
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
 import django
@@ -37,6 +54,10 @@ def run_migrations():
     try:
         import sys
         import io
+        
+        # Append 'migrate' to sys.argv so our sync signals know to ignore saves during migration
+        sys.argv.append('migrate')
+        
         # Redirect stdout/stderr so Django doesn't crash when printing in noconsole mode
         old_stdout = sys.stdout
         old_stderr = sys.stderr
@@ -47,6 +68,9 @@ def run_migrations():
         finally:
             sys.stdout = old_stdout
             sys.stderr = old_stderr
+            # Remove the 'migrate' flag
+            if 'migrate' in sys.argv:
+                sys.argv.remove('migrate')
         messagebox.showinfo("Success", "Database setup completed successfully.")
     except Exception as e:
         messagebox.showerror("Error", f"Migration failed:\n{e}")
@@ -168,12 +192,21 @@ timeout /t 1 /nobreak > NUL
 del "{current_exe_path}"
 if exist "{current_exe_path}" goto wait
 move /y "{update_exe_path}" "{current_exe_path}"
+set _MEIPASS2=
+set _MEIPASS=
+set TCL_LIBRARY=
+set TK_LIBRARY=
 start "" "{current_exe_path}"
 del "%~f0"
 ''')
                 # Launch batch file hidden and exit
                 CREATE_NO_WINDOW = 0x08000000
-                subprocess.Popen([bat_path], shell=True, creationflags=CREATE_NO_WINDOW)
+                env = os.environ.copy()
+                env.pop('_MEIPASS2', None)
+                env.pop('_MEIPASS', None)
+                env.pop('TCL_LIBRARY', None)
+                env.pop('TK_LIBRARY', None)
+                subprocess.Popen([bat_path], shell=True, creationflags=CREATE_NO_WINDOW, env=env)
                 sys.exit(0)
 
             threading.Thread(target=run_download, daemon=True).start()

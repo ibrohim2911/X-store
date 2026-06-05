@@ -8,11 +8,13 @@ from rest_framework import status
 from django.db import transaction
 from django.db.models import Sum, F, Q
 from django_filters import rest_framework as filters
-from .models import Sale, SaleItem, Cash, PaymentMenthod, Client, AuditLog, SystemSetting
-from .serializers import SaleSerializer, SaleItemSerializer, CashSerializer, PaymentMenthodSerializer, ClientSerializer, AuditLogSerializer, SystemSettingSerializer
+from .models import Sale, SaleItem, Cash, PaymentMenthod, Client, AuditLog, SystemSetting, Debt
+from .serializers import SaleSerializer, SaleItemSerializer, CashSerializer, PaymentMenthodSerializer, ClientSerializer, AuditLogSerializer, SystemSettingSerializer, DebtSerializer
 from product.models import Variant
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
+from rest_framework.permissions import IsAuthenticated
+from common.permissions import IsRoleAuthorized
 import urllib.request
 import json
 
@@ -59,12 +61,13 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = AuditLogSerializer
 
 class SaleViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAuthenticated, IsRoleAuthorized]
     queryset = Sale.objects.all().order_by('-created_at')
     serializer_class = SaleSerializer
     filterset_class = SaleFilter
     
     def perform_create(self, serializer):
-        super().perform_create(serializer)
+        serializer.save(seller=self.request.user)
         broadcast_update('sales_updated')
         log_audit(self.request.user, "Sale Created", f"Sale ID: {serializer.instance.id}")
 
@@ -108,7 +111,7 @@ class SaleViewSet(viewsets.ModelViewSet):
         
         new_quantities = {}
         for item_data in new_items_data:
-            vid = int(item_data.get('variant'))
+            vid = str(item_data.get('variant'))
             qty = int(item_data.get('quantity', 0))
             new_quantities[vid] = new_quantities.get(vid, 0) + qty
             
@@ -159,7 +162,7 @@ class SaleViewSet(viewsets.ModelViewSet):
         new_tax_totals = {}
         new_applied_taxes = {}
         for item_data in new_items_data:
-            vid = int(item_data.get('variant'))
+            vid = str(item_data.get('variant'))
             qty = int(item_data.get('quantity', 0))
             apply_tax = item_data.get('apply_tax')
             
@@ -208,7 +211,7 @@ class SaleViewSet(viewsets.ModelViewSet):
         # Re-create items with new quantities
         total_new_qty = 0
         for item_data in new_items_data:
-            vid = int(item_data.get('variant'))
+            vid = str(item_data.get('variant'))
             qty = int(item_data.get('quantity', 0))
             if qty > 0:
                 total_new_qty += qty
@@ -318,12 +321,29 @@ class SaleItemViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(sale_id=sale_id)
         return queryset
 
+class ClientViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAuthenticated, IsRoleAuthorized]
+    queryset = Client.objects.all()
+    serializer_class = ClientSerializer
+    
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)
+
+class PaymentMenthodViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAuthenticated, IsRoleAuthorized]
+    queryset = PaymentMenthod.objects.all()
+    serializer_class = PaymentMenthodSerializer
+    
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)
+
 class CashViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAuthenticated, IsRoleAuthorized]
     queryset = Cash.objects.all().order_by('-created_at')
     serializer_class = CashSerializer
     
     def perform_create(self, serializer):
-        super().perform_create(serializer)
+        serializer.save(user=self.request.user)
         broadcast_update('cash_updated')
         log_audit(self.request.user, "Cash Added", f"Amount: {serializer.instance.amount}, In: {serializer.instance.is_cash_in}")
 
@@ -333,6 +353,25 @@ class CashViewSet(viewsets.ModelViewSet):
 
     def perform_destroy(self, instance):
         log_audit(self.request.user, "Cash Deleted", f"Amount: {instance.amount}")
+        super().perform_destroy(instance)
+        broadcast_update('cash_updated')
+
+class DebtViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAuthenticated, IsRoleAuthorized]
+    queryset = Debt.objects.all().order_by('-created_at')
+    serializer_class = DebtSerializer
+
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
+        broadcast_update('cash_updated')
+        log_audit(self.request.user, "Debt Added", f"Amount: {serializer.instance.amount}, In: {serializer.instance.is_income}")
+
+    def perform_update(self, serializer):
+        super().perform_update(serializer)
+        broadcast_update('cash_updated')
+
+    def perform_destroy(self, instance):
+        log_audit(self.request.user, "Debt Deleted", f"Amount: {instance.amount}")
         super().perform_destroy(instance)
         broadcast_update('cash_updated')
 

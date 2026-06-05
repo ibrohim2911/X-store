@@ -4,9 +4,13 @@ from rest_framework import permissions, status
 from django.contrib.auth import authenticate, login, logout
 from .models import User
 from .serializers import UserSerializer
+from common.permissions import IsRoleAuthorized
+
 class UserViewSet(viewsets.ModelViewSet):
+    permission_classes = [permissions.IsAuthenticated, IsRoleAuthorized]
     queryset = User.objects.all()
     serializer_class = UserSerializer
+
 class LoginView(APIView):
     # This view must be accessible to unauthenticated users
     permission_classes = [permissions.AllowAny]

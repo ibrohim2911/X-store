@@ -30,6 +30,7 @@ router.register(r'sizes', product_views.SizeViewSet)
 router.register(r'size-scales', product_views.SizeScaleViewSet)
 router.register(r'audit-logs', sale_views.AuditLogViewSet)
 router.register(r'system-settings', sale_views.SystemSettingViewSet)
+router.register(r'debts', sale_views.DebtViewSet)
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -41,6 +42,7 @@ urlpatterns = [
     path('api/ngrok-url/', sale_views.NgrokUrlView.as_view(), name='ngrok-url'),
     path('api/settings/printer/', common_views.PrinterSettingView.as_view(), name='printer-settings'),
     path('api/', include(router.urls)),
+    path('api/sync/', include('sync.urls')),
     re_path(r'^media/(?P<path>.*)$', serve, {'document_root': settings.MEDIA_ROOT}),
 ] + static('/assets/', document_root=settings.BASE_DIR / 'frontend_dist/assets')
 

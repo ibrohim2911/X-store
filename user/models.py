@@ -22,6 +22,14 @@ class UserManager(BaseUserManager):
 
         return self.create_user(phone_number, password, **extra_fields)
 class User(AbstractUser, BaseModel):
+    ROLE_CHOICES = [
+        ('superadmin', 'Superadmin'),
+        ('manager', 'Manager'),
+        ('senior_seller', 'Senior Seller'),
+        ('junior_seller', 'Junior Seller'),
+    ]
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='junior_seller')
+    store = models.ForeignKey('common.Store', on_delete=models.CASCADE, null=True, blank=True, related_name='users')
     name = models.CharField(max_length=255)
     phone_number = models.CharField(max_length=20, unique=True)
     username = None

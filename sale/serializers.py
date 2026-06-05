@@ -1,4 +1,4 @@
-from .models import Sale, SaleItem, Cash, PaymentMenthod, Client, AuditLog, SystemSetting
+from .models import Sale, SaleItem, Cash, PaymentMenthod, Client, AuditLog, SystemSetting, Debt
 from rest_framework import serializers
 
 class SystemSettingSerializer(serializers.ModelSerializer):
@@ -38,4 +38,10 @@ class AuditLogSerializer(serializers.ModelSerializer):
     user_name = serializers.CharField(source='user.name', read_only=True)
     class Meta:
         model = AuditLog
+        fields = '__all__'
+
+class DebtSerializer(serializers.ModelSerializer):
+    user_name = serializers.CharField(source='user.name', read_only=True)
+    class Meta:
+        model = Debt
         fields = '__all__'
