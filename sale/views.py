@@ -8,6 +8,7 @@ from rest_framework import status
 from django.db import transaction
 from django.db.models import Sum, F, Q
 from django_filters import rest_framework as filters
+from rest_framework.filters import SearchFilter
 from .models import Sale, SaleItem, Cash, CashCategory, PaymentMenthod, Client, AuditLog, SystemSetting, Debt
 from .serializers import SaleSerializer, SaleItemSerializer, CashSerializer, CashCategorySerializer, PaymentMenthodSerializer, ClientSerializer, AuditLogSerializer, SystemSettingSerializer, DebtSerializer
 from product.models import Variant
@@ -390,6 +391,8 @@ class ClientViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, IsRoleAuthorized]
     queryset = Client.objects.all()
     serializer_class = ClientSerializer
+    filter_backends = [SearchFilter]
+    search_fields = ['name', 'phone']
     
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)

@@ -22,6 +22,17 @@ class ProductViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, IsRoleAuthorized]
     queryset = Products.objects.all().order_by('-created_at')
     serializer_class = ProductSerializer
+    
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        search = self.request.query_params.get('search')
+        if search:
+            from django.db.models import Q
+            queryset = queryset.filter(
+                Q(barcode=search) | Q(name__icontains=search)
+            ).distinct()
+        return queryset
+
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
 
@@ -242,8 +253,19 @@ class VariantViewSet(viewsets.ModelViewSet):
     queryset = Variant.objects.all().order_by('-id')
     serializer_class = VariantSerializer
     pagination_class = LargeResultsSetPagination
-    filter_backends = [filters.SearchFilter]
-    search_fields = ['product__name', 'sku', 'product__barcode', 'size__name']
+    
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        search = self.request.query_params.get('search')
+        if search:
+            from django.db.models import Q
+            queryset = queryset.filter(
+                Q(product__barcode=search) | 
+                Q(sku=search) | 
+                Q(product__name__icontains=search) | 
+                Q(size__name__icontains=search)
+            ).distinct()
+        return queryset
     
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
