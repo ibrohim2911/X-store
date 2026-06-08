@@ -60,7 +60,6 @@ def handle_sale_updates(sender, instance, **kwargs):
                     reason=f"Debt increased for Sale #{instance.id}",
                     sale=instance
                 )
-
 @receiver(post_save, sender=Sale)
 def create_cash_on_sale(sender, instance, created, **kwargs):
     # Create Cash In when a Sale is made

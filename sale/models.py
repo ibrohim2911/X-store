@@ -40,11 +40,20 @@ class SaleItem(BaseModel):
     def __str__(self):
         return f"{self.variant.product.name} - {self.quantity} - {self.price}"
 
+class CashCategory(BaseModel):
+    store = models.ForeignKey('common.Store', on_delete=models.CASCADE, null=True, blank=True, related_name='cash_categories')
+    name = models.CharField(max_length=100)
+    is_system = models.BooleanField(default=False)
+
+    def __str__(self):
+        return self.name
+
 class Cash(BaseModel):
     store = models.ForeignKey('common.Store', on_delete=models.CASCADE, null=True, blank=True, related_name='cashes')
     user = models.ForeignKey('user.User', on_delete=models.CASCADE, null=True, blank=True)
     is_cash_in = models.BooleanField(default=True)
     amount = models.DecimalField(max_digits=10, decimal_places=2)
+    category = models.ForeignKey(CashCategory, on_delete=models.SET_NULL, null=True, blank=True, related_name='cashes')
     reason = models.CharField(max_length=255 )
     sale = models.ForeignKey(Sale, on_delete=models.CASCADE, null=True, blank=True)
     client = models.ForeignKey(Client, on_delete=models.CASCADE, null=True, blank=True)

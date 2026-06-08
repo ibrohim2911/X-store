@@ -1,4 +1,4 @@
-from .models import Sale, SaleItem, Cash, PaymentMenthod, Client, AuditLog, SystemSetting, Debt
+from .models import Sale, SaleItem, Cash, CashCategory, PaymentMenthod, Client, AuditLog, SystemSetting, Debt
 from rest_framework import serializers
 
 class SystemSettingSerializer(serializers.ModelSerializer):
@@ -14,7 +14,13 @@ class SaleItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = SaleItem
         fields = '__all__'
+class CashCategorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CashCategory
+        fields = '__all__'
+
 class CashSerializer(serializers.ModelSerializer):
+    category_name = serializers.CharField(source='category.name', read_only=True)
     class Meta:
         model = Cash
         fields = '__all__'

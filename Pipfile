@@ -20,6 +20,7 @@ pywin32 = "*"
 python-barcode = "*"
 pillow = "*"
 requests = "*"
+pytelegrambotapi = "*"
 
 [dev-packages]
 

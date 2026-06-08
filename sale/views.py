@@ -8,8 +8,8 @@ from rest_framework import status
 from django.db import transaction
 from django.db.models import Sum, F, Q
 from django_filters import rest_framework as filters
-from .models import Sale, SaleItem, Cash, PaymentMenthod, Client, AuditLog, SystemSetting, Debt
-from .serializers import SaleSerializer, SaleItemSerializer, CashSerializer, PaymentMenthodSerializer, ClientSerializer, AuditLogSerializer, SystemSettingSerializer, DebtSerializer
+from .models import Sale, SaleItem, Cash, CashCategory, PaymentMenthod, Client, AuditLog, SystemSetting, Debt
+from .serializers import SaleSerializer, SaleItemSerializer, CashSerializer, CashCategorySerializer, PaymentMenthodSerializer, ClientSerializer, AuditLogSerializer, SystemSettingSerializer, DebtSerializer
 from product.models import Variant
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
@@ -76,7 +76,17 @@ class SaleViewSet(viewsets.ModelViewSet):
         broadcast_update('sales_updated')
         log_audit(self.request.user, "Sale Updated", f"Sale ID: {serializer.instance.id} status changed to {serializer.instance.status}")
 
+    @transaction.atomic
     def perform_destroy(self, instance):
+        # Restore stock for each item
+        for item in instance.items.all():
+            variant = item.variant
+            variant.quantity += item.quantity
+            variant.save()
+            
+        # Cash records related to this sale are deleted automatically by CASCADE
+        # if the ForeignKey is on_delete=CASCADE.
+        
         log_audit(self.request.user, "Sale Deleted", f"Sale ID: {instance.id}")
         super().perform_destroy(instance)
         broadcast_update('sales_updated')
@@ -139,6 +149,7 @@ class SaleViewSet(viewsets.ModelViewSet):
                 price = old_item.price
                 refund_amount = decimal.Decimal(str(price)) * decimal.Decimal(str(diff))
                 
+                savdo_cat, _ = CashCategory.objects.get_or_create(name='Savdo', defaults={'is_system': True})
                 # Create Cash Chiqim for refunded product price
                 if refund_amount > 0:
                     Cash.objects.create(
@@ -146,6 +157,7 @@ class SaleViewSet(viewsets.ModelViewSet):
                         is_cash_in=False,
                         amount=refund_amount,
                         reason="returned sale item",
+                        category=savdo_cat,
                         sale=sale
                     )
                 
@@ -280,6 +292,11 @@ class SaleViewSet(viewsets.ModelViewSet):
             tax_setting = SystemSetting.objects.filter(key='tax_amount').first()
             default_tax = decimal.Decimal(str(tax_setting.value)) if tax_setting else decimal.Decimal('20000.00')
 
+            savdo_cat, _ = CashCategory.objects.get_or_create(name='Savdo', defaults={'is_system': True})
+            soliq_cat, _ = CashCategory.objects.get_or_create(name='Soliq', defaults={'is_system': True})
+            
+            total_tax_deducted = decimal.Decimal('0.00')
+
             for item_data in items_data:
                 variant = Variant.objects.get(id=item_data.get('variant'))
                 qty = int(item_data.get('quantity', 0))
@@ -295,15 +312,42 @@ class SaleViewSet(viewsets.ModelViewSet):
                     applied_tax_amount=applied_tax
                 )
                 
-                # Deduct tax from cash immediately
                 if applied_tax > 0 and qty > 0:
-                    Cash.objects.create(
-                        user=sale.seller,
-                        is_cash_in=False,
-                        amount=applied_tax * qty,
-                        reason="20 tax",
-                        sale=sale
-                    )
+                    total_tax_deducted += (applied_tax * qty)
+
+            # Deduct tax from cash
+            if total_tax_deducted > 0:
+                Cash.objects.create(
+                    user=seller,
+                    is_cash_in=False,
+                    amount=total_tax_deducted,
+                    reason="20 tax",
+                    category=soliq_cat,
+                    sale=sale
+                )
+                
+            # Add Sale Income to Cash
+            net_income = sale.total_price - sale.debt
+            if net_income > 0:
+                Cash.objects.create(
+                    user=seller,
+                    is_cash_in=True,
+                    amount=net_income,
+                    reason="sale income",
+                    category=savdo_cat,
+                    sale=sale
+                )
+                
+            # Create Debt record if there is debt
+            if sale.debt > 0:
+                Debt.objects.create(
+                    user=seller,
+                    is_income=False, # Debt given to client
+                    amount=sale.debt,
+                    description=f"Savdodan qarz (Chek: {sale.id})",
+                    person=sale.client.name if sale.client else "Mijoz",
+                    status='active'
+                )
             
             log_audit(request.user, "Sale Created", f"Sale ID: {sale.id}, Total: {sale.total_price}")
             broadcast_update('sales_updated')
@@ -314,12 +358,21 @@ class SaleViewSet(viewsets.ModelViewSet):
 class SaleItemViewSet(viewsets.ModelViewSet):
     queryset = SaleItem.objects.all()
     serializer_class = SaleItemSerializer
+    
     def get_queryset(self):
         queryset = super().get_queryset()
         sale_id = self.request.query_params.get('sale_id')
         if sale_id is not None:
             queryset = queryset.filter(sale_id=sale_id)
         return queryset
+
+    @transaction.atomic
+    def perform_destroy(self, instance):
+        variant = instance.variant
+        variant.quantity += instance.quantity
+        variant.save()
+        super().perform_destroy(instance)
+        broadcast_update('sales_updated')
 
 class ClientViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, IsRoleAuthorized]
@@ -336,6 +389,11 @@ class PaymentMenthodViewSet(viewsets.ModelViewSet):
     
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
+
+class CashCategoryViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAuthenticated, IsRoleAuthorized]
+    queryset = CashCategory.objects.all()
+    serializer_class = CashCategorySerializer
 
 class CashViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, IsRoleAuthorized]
@@ -390,86 +448,65 @@ class DashboardStatsView(APIView):
         
         sales = Sale.objects.all()
         cashes = Cash.objects.all()
+        debts = Debt.objects.all()
         if start_date:
             sales = sales.filter(created_at__gte=start_date)
             cashes = cashes.filter(created_at__gte=start_date)
+            debts = debts.filter(created_at__gte=start_date)
         if end_date:
             sales = sales.filter(created_at__lte=end_date)
             cashes = cashes.filter(created_at__lte=end_date)
+            debts = debts.filter(created_at__lte=end_date)
             
         completed_sales = sales.filter(status='completed')
-        returned_sales = sales.filter(status='returned')
-        
-        incomes_from_sale = completed_sales.aggregate(total=Sum(F('total_price') - F('debt')))['total'] or 0
-        incomes_from_sale_qty = completed_sales.count()
-        
-        incomes_pending = completed_sales.aggregate(total=Sum('debt'))['total'] or 0
-        incomes_pending_qty = completed_sales.filter(debt__gt=0).count()
-        
-        total_sales_revenue = completed_sales.aggregate(total=Sum('total_price'))['total'] or 0
-        
-        cash_incomes = cashes.filter(is_cash_in=True).aggregate(total=Sum('amount'))['total'] or 0
-        cash_incomes_qty = cashes.filter(is_cash_in=True).count()
-        
-        cash_outcomes_all = cashes.filter(is_cash_in=False)
-        cash_outcomes = cash_outcomes_all.exclude(reason='20 tax').aggregate(total=Sum('amount'))['total'] or 0
-        cash_outcomes_qty = cash_outcomes_all.exclude(reason='20 tax').count()
-        
-        qarz_outcomes = cash_outcomes_all.filter(reason__icontains='qarz').aggregate(total=Sum('amount'))['total'] or 0
-        qarz_outcomes_qty = cash_outcomes_all.filter(reason__icontains='qarz').count()
-        
-        returned_debts_qs = cashes.filter(is_cash_in=True).filter(Q(reason__icontains='qarz') | Q(reason__icontains='debt'))
-        returned_debts = returned_debts_qs.aggregate(total=Sum('amount'))['total'] or 0
-        returned_debts_qty = returned_debts_qs.count()
-        
-        tax_outcomes = cash_outcomes_all.filter(reason='20 tax').aggregate(total=Sum('amount'))['total'] or 0
-        
-        outcomes_from_refunds = returned_sales.aggregate(total=Sum('total_price'))['total'] or 0
-        outcomes_from_refunds_qty = returned_sales.count()
-        
-        all_incomes = incomes_from_sale + cash_incomes
-        all_outcomes = cash_outcomes + tax_outcomes + outcomes_from_refunds
-        
         sale_items = SaleItem.objects.filter(sale__in=completed_sales)
-        all_sold_product_bought_price = sale_items.aggregate(total=Sum(F('variant__cost_price') * F('quantity')))['total'] or 0
-        all_sold_product_sticker_price = sale_items.aggregate(total=Sum(F('variant__sticker_price') * F('quantity')))['total'] or 0
-        total_items_sold = sale_items.aggregate(total=Sum('quantity'))['total'] or 0
         
-        gross_profit = total_sales_revenue - all_sold_product_bought_price
-        discount_markup_diff = total_sales_revenue - all_sold_product_sticker_price
-        net_profit = all_incomes - all_outcomes
+        net_sales = completed_sales.aggregate(total=Sum(F('total_price') - F('debt')))['total'] or decimal.Decimal('0.00')
+        tax_amount = sale_items.aggregate(total=Sum(F('applied_tax_amount') * F('quantity')))['total'] or decimal.Decimal('0.00')
         
-        top_products = sale_items.values('variant__product__name').annotate(
-            total_qty=Sum('quantity')
-        ).order_by('-total_qty')[:5]
+        savdodan_kirim = net_sales - tax_amount
         
-        top_selling = [
-            {'name': item['variant__product__name'], 'quantity': item['total_qty']}
-            for item in top_products
-        ]
+        qarz_from_sale = completed_sales.aggregate(total=Sum('debt'))['total'] or decimal.Decimal('0.00')
+        qarz_without_sale = debts.filter(is_income=False, status='active').aggregate(total=Sum('amount'))['total'] or decimal.Decimal('0.00')
+        qarz_all = qarz_from_sale + qarz_without_sale
+        
+        sale_price_total = completed_sales.aggregate(total=Sum('total_price'))['total'] or decimal.Decimal('0.00')
+        cost_price_total = sale_items.aggregate(total=Sum(F('variant__cost_price') * F('quantity')))['total'] or decimal.Decimal('0.00')
+        
+        yalpi_foyda = sale_price_total - cost_price_total - tax_amount
+        
+        xarajatlar_cashes = cashes.filter(is_cash_in=False).exclude(reason__icontains='tax').exclude(category__name='Soliq').exclude(reason='returned sale item')
+        x_categories = xarajatlar_cashes.values('category__name', 'reason').annotate(total=Sum('amount'))
+        
+        xarajatlar_dict = {}
+        for xc in x_categories:
+            cat_name = xc['category__name']
+            if not cat_name:
+                # Fallback to older logic or 'Boshqa'
+                reason_lower = str(xc['reason']).lower()
+                if 'oylik' in reason_lower: cat_name = 'Oylik'
+                elif 'ijara' in reason_lower: cat_name = 'Ijara'
+                elif 'qarz' in reason_lower: continue # Skip old qarz from xarajat
+                else: cat_name = 'Boshqa'
+            
+            xarajatlar_dict[cat_name] = xarajatlar_dict.get(cat_name, decimal.Decimal('0.00')) + (xc['total'] or decimal.Decimal('0.00'))
+            
+        xarajatlar_list = [{'category': k, 'amount': v} for k, v in xarajatlar_dict.items()]
         
         from product.models import Variant
         total_inventory_qty = Variant.objects.aggregate(total=Sum('quantity'))['total'] or 0
-        total_inventory_value = Variant.objects.aggregate(total=Sum(F('sticker_price') * F('quantity')))['total'] or 0
-        total_inventory_cost = Variant.objects.aggregate(total=Sum(F('cost_price') * F('quantity')))['total'] or 0
+        total_inventory_value = Variant.objects.aggregate(total=Sum(F('sticker_price') * F('quantity')))['total'] or decimal.Decimal('0.00')
+        total_inventory_cost = Variant.objects.aggregate(total=Sum(F('cost_price') * F('quantity')))['total'] or decimal.Decimal('0.00')
         
         return Response({
-            'all_incomes': all_incomes,
-            'all_outcomes': all_outcomes,
-            'incomes_from_sale': {'val': incomes_from_sale, 'qty': incomes_from_sale_qty},
-            'incomes_pending': {'val': incomes_pending, 'qty': incomes_pending_qty},
-            'incomes_from_other_source': {'val': cash_incomes, 'qty': cash_incomes_qty},
-            'outcomes_from_refunds': {'val': outcomes_from_refunds, 'qty': outcomes_from_refunds_qty},
-            'outcomes_from_cash_flow': {'val': cash_outcomes, 'qty': cash_outcomes_qty},
-            'qarz_outcomes': {'val': qarz_outcomes, 'qty': qarz_outcomes_qty},
-            'returned_debts': {'val': returned_debts, 'qty': returned_debts_qty},
-            'net_profit': net_profit,
-            'gross_profit': gross_profit,
-            'discount_markup_difference': discount_markup_diff,
-            'all_sold_product_bought_price': {'val': all_sold_product_bought_price, 'qty': total_items_sold},
-            'all_sold_product_sticker_price': {'val': all_sold_product_sticker_price, 'qty': total_items_sold},
-            'total_sales_revenue': total_sales_revenue,
-            'top_selling_products': top_selling,
+            'savdodan_kirim': savdodan_kirim,
+            'tax_amount': tax_amount,
+            'qarz_all': qarz_all,
+            'qarz_from_sale': qarz_from_sale,
+            'qarz_without_sale': qarz_without_sale,
+            'yalpi_foyda': yalpi_foyda,
+            'sotilgan_tovar_tan_narx': cost_price_total,
+            'xarajatlar': xarajatlar_list,
             'total_inventory': {
                 'qty': total_inventory_qty,
                 'sticker_value': total_inventory_value,
