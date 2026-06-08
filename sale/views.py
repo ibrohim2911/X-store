@@ -152,11 +152,12 @@ class SaleViewSet(viewsets.ModelViewSet):
                 savdo_cat, _ = CashCategory.objects.get_or_create(name='Savdo', defaults={'is_system': True})
                 # Create Cash Chiqim for refunded product price
                 if refund_amount > 0:
+                    pm_name = sale.payment_method.name if sale.payment_method else "Noma'lum"
                     Cash.objects.create(
                         user=sale.seller,
                         is_cash_in=False,
                         amount=refund_amount,
-                        reason="returned sale item",
+                        reason=f"{pm_name}: returned sale item",
                         category=savdo_cat,
                         sale=sale
                     )
@@ -203,20 +204,22 @@ class SaleViewSet(viewsets.ModelViewSet):
             
             if diff_tax > 0:
                 # We need to charge more tax
+                pm_name = sale.payment_method.name if sale.payment_method else "Noma'lum"
                 Cash.objects.create(
                     user=sale.seller,
                     is_cash_in=False,
                     amount=diff_tax,
-                    reason="20 tax (updated)",
+                    reason=f"{pm_name}: 20 tax (updated)",
                     sale=sale
                 )
             elif diff_tax < 0:
                 # We need to refund some tax
+                pm_name = sale.payment_method.name if sale.payment_method else "Noma'lum"
                 Cash.objects.create(
                     user=sale.seller,
                     is_cash_in=True,
                     amount=abs(diff_tax),
-                    reason="returned 20 tax (updated)",
+                    reason=f"{pm_name}: returned 20 tax (updated)",
                     sale=sale
                 )
 
@@ -317,11 +320,12 @@ class SaleViewSet(viewsets.ModelViewSet):
 
             # Deduct tax from cash
             if total_tax_deducted > 0:
+                pm_name = sale.payment_method.name if sale.payment_method else "Noma'lum"
                 Cash.objects.create(
                     user=seller,
                     is_cash_in=False,
                     amount=total_tax_deducted,
-                    reason="20 tax",
+                    reason=f"{pm_name}: 20 tax",
                     category=soliq_cat,
                     sale=sale
                 )
@@ -329,11 +333,12 @@ class SaleViewSet(viewsets.ModelViewSet):
             # Add Sale Income to Cash
             net_income = sale.total_price - sale.debt
             if net_income > 0:
+                pm_name = sale.payment_method.name if sale.payment_method else "Noma'lum"
                 Cash.objects.create(
                     user=seller,
                     is_cash_in=True,
                     amount=net_income,
-                    reason="sale income",
+                    reason=f"{pm_name}: savdodan kirim",
                     category=savdo_cat,
                     sale=sale
                 )
@@ -351,6 +356,13 @@ class SaleViewSet(viewsets.ModelViewSet):
             
             log_audit(request.user, "Sale Created", f"Sale ID: {sale.id}, Total: {sale.total_price}")
             broadcast_update('sales_updated')
+            
+            try:
+                from common.telegram_bot import send_sale_notification
+                send_sale_notification(sale)
+            except Exception as e:
+                print(f"Failed to send sale notification: {e}")
+                
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         else:
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

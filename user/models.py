@@ -32,6 +32,7 @@ class User(AbstractUser, BaseModel):
     store = models.ForeignKey('common.Store', on_delete=models.CASCADE, null=True, blank=True, related_name='users')
     name = models.CharField(max_length=255)
     phone_number = models.CharField(max_length=20, unique=True)
+    telegram_chat_id = models.CharField(max_length=100, null=True, blank=True)
     username = None
     USERNAME_FIELD = 'phone_number'
     REQUIRED_FIELDS = ['name']

@@ -108,6 +108,14 @@ def run_app(local_ip):
             server = Server(application=config.asgi.application, endpoints=endpoints)
             server.run()
         threading.Thread(target=start_server, daemon=True).start()
+        
+        # Start Telegram Bot Polling
+        try:
+            from common.telegram_bot import start_telegram_bot_thread
+            start_telegram_bot_thread()
+        except Exception as e:
+            print("Could not start Telegram Bot:", e)
+
         server_started = True
 
     # Open Default Web Browser
