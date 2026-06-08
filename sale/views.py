@@ -463,6 +463,7 @@ class DashboardStatsView(APIView):
         
         net_sales = completed_sales.aggregate(total=Sum(F('total_price') - F('debt')))['total'] or decimal.Decimal('0.00')
         tax_amount = sale_items.aggregate(total=Sum(F('applied_tax_amount') * F('quantity')))['total'] or decimal.Decimal('0.00')
+        sold_variants_count = sale_items.aggregate(total=Sum('quantity'))['total'] or 0
         
         savdodan_kirim = net_sales - tax_amount
         
@@ -499,6 +500,7 @@ class DashboardStatsView(APIView):
         total_inventory_cost = Variant.objects.aggregate(total=Sum(F('cost_price') * F('quantity')))['total'] or decimal.Decimal('0.00')
         
         return Response({
+            'sold_variants_count': sold_variants_count,
             'savdodan_kirim': savdodan_kirim,
             'tax_amount': tax_amount,
             'qarz_all': qarz_all,

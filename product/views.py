@@ -11,11 +11,17 @@ from .serializers import ProductSerializer, VariantSerializer, SizeSerializer, S
 from rest_framework.permissions import IsAuthenticated
 from common.permissions import IsRoleAuthorized
 
+from rest_framework.pagination import PageNumberPagination
+
+class LargeResultsSetPagination(PageNumberPagination):
+    page_size = 500
+    page_size_query_param = 'page_size'
+    max_page_size = 1000
+
 class ProductViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, IsRoleAuthorized]
     queryset = Products.objects.all().order_by('-created_at')
     serializer_class = ProductSerializer
-    pagination_class = None
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
 
@@ -233,9 +239,9 @@ class ProductViewSet(viewsets.ModelViewSet):
             return Response({'error': str(e), 'traceback': traceback.format_exc()}, status=500)
 class VariantViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, IsRoleAuthorized]
-    queryset = Variant.objects.all()
+    queryset = Variant.objects.all().order_by('-id')
     serializer_class = VariantSerializer
-    pagination_class = None
+    pagination_class = LargeResultsSetPagination
     filter_backends = [filters.SearchFilter]
     search_fields = ['product__name', 'sku', 'product__barcode', 'size__name']
     
