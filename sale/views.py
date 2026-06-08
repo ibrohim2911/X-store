@@ -448,6 +448,11 @@ class DashboardStatsView(APIView):
             for item in top_products
         ]
         
+        from product.models import Variant
+        total_inventory_qty = Variant.objects.aggregate(total=Sum('quantity'))['total'] or 0
+        total_inventory_value = Variant.objects.aggregate(total=Sum(F('sticker_price') * F('quantity')))['total'] or 0
+        total_inventory_cost = Variant.objects.aggregate(total=Sum(F('cost_price') * F('quantity')))['total'] or 0
+        
         return Response({
             'all_incomes': all_incomes,
             'all_outcomes': all_outcomes,
@@ -464,5 +469,10 @@ class DashboardStatsView(APIView):
             'all_sold_product_bought_price': {'val': all_sold_product_bought_price, 'qty': total_items_sold},
             'all_sold_product_sticker_price': {'val': all_sold_product_sticker_price, 'qty': total_items_sold},
             'total_sales_revenue': total_sales_revenue,
-            'top_selling_products': top_selling
+            'top_selling_products': top_selling,
+            'total_inventory': {
+                'qty': total_inventory_qty,
+                'sticker_value': total_inventory_value,
+                'cost_value': total_inventory_cost
+            }
         })

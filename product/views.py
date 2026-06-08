@@ -13,7 +13,7 @@ from common.permissions import IsRoleAuthorized
 
 class ProductViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, IsRoleAuthorized]
-    queryset = Products.objects.all()
+    queryset = Products.objects.all().order_by('-created_at')
     serializer_class = ProductSerializer
     pagination_class = None
     def perform_create(self, serializer):
